@@ -1,17 +1,18 @@
 {
-  "name": "purex-store-manager-api-v3-arabic",
-  "version": "3.0.0",
-  "type": "module",
+  "name": "purex-store-manager-api-v4",
+  "version": "4.0.0",
+  "description": "PUREX STORE private Arabic manager API for subscribers and Kick control extension.",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=18"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.3"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

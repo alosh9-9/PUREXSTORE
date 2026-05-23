@@ -1,186 +1,149 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(cors({ origin: true, credentials: false }));
+app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
 
+const PORT = process.env.PORT || 3000;
 const BRAND_NAME = process.env.BRAND_NAME || "PUREX STORE";
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || "1507511509339607060";
 const EXTENSION_ID = process.env.EXTENSION_ID || "bicngpoijkcigllgeeocfoifegobhkfj";
 const SUPPORT_URL = process.env.SUPPORT_URL || "https://discord.gg/a99";
 
-function splitIds(value = "") {
-  return String(value)
+function listFromEnv(name) {
+  return String(process.env[name] || "")
     .split(",")
-    .map((id) => id.trim())
+    .map((x) => x.trim())
     .filter(Boolean);
 }
 
 function loadSubscribers() {
-  const out = new Map();
+  const allowed = listFromEnv("ALLOWED_DISCORD_IDS");
+  let map = {};
 
-  for (const id of splitIds(process.env.ALLOWED_DISCORD_IDS || "")) {
-    out.set(id, {
-      discordId: id,
-      name: "مشترك",
-      plan: "basic",
-      role: "member",
-      status: "active",
-      expiresAt: "2099-12-31"
-    });
+  for (const id of allowed) {
+    map[id] = {
+      id,
+      name: `مشترك ${id.slice(-4)}`,
+      plan: "vip",
+      expiresAt: "2099-12-31",
+      status: "active"
+    };
   }
 
-  try {
-    const raw = process.env.SUBSCRIBERS_JSON;
-    if (raw) {
-      const parsed = JSON.parse(raw);
+  if (process.env.SUBSCRIBERS_JSON) {
+    try {
+      const parsed = JSON.parse(process.env.SUBSCRIBERS_JSON);
       for (const [id, info] of Object.entries(parsed)) {
-        out.set(String(id), { discordId: String(id), ...info });
+        map[id] = {
+          id,
+          name: info.name || `مشترك ${id.slice(-4)}`,
+          plan: info.plan || "vip",
+          expiresAt: info.expiresAt || "2099-12-31",
+          status: info.status || "active"
+        };
       }
+    } catch (error) {
+      console.error("SUBSCRIBERS_JSON parse error:", error.message);
     }
-  } catch (err) {
-    console.warn("SUBSCRIBERS_JSON غير صالح:", err.message);
   }
 
-  try {
-    const file = path.join(__dirname, "subscribers.json");
-    if (fs.existsSync(file)) {
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-      for (const [id, info] of Object.entries(parsed)) {
-        if (!String(id).includes("PUT_YOUR")) {
-          out.set(String(id), { discordId: String(id), ...info });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("subscribers.json غير صالح:", err.message);
-  }
-
-  return out;
+  return map;
 }
 
 function isExpired(expiresAt) {
-  if (!expiresAt || expiresAt === "lifetime") return false;
+  if (!expiresAt || expiresAt === "never" || expiresAt === "lifetime") return false;
   const end = new Date(`${expiresAt}T23:59:59Z`);
-  return Number.isFinite(end.getTime()) && Date.now() > end.getTime();
+  if (Number.isNaN(end.getTime())) return false;
+  return end.getTime() < Date.now();
 }
 
-function extractDiscordUser(body = {}, query = {}) {
-  const source = body.user || body.discordUser || body.profile || body || query || {};
-  const id =
-    source.id ||
-    source.discordId ||
-    source.discord_id ||
+function getDiscordId(body = {}, query = {}) {
+  return String(
     body.discordUserId ||
-    body.discord_id ||
-    body.id ||
-    query.discordUserId ||
-    query.discord_id ||
-    query.id ||
-    "";
+      body.discord_user_id ||
+      body.discord_id ||
+      body.userId ||
+      body.id ||
+      query.discordUserId ||
+      query.discord_user_id ||
+      query.discord_id ||
+      query.userId ||
+      query.id ||
+      ""
+  ).trim();
+}
 
+function verifySubscriber(discordId) {
+  const subscribers = loadSubscribers();
+  const sub = subscribers[discordId];
+  const exists = Boolean(sub);
+  const active = exists && sub.status === "active" && !isExpired(sub.expiresAt);
   return {
-    id: String(id || "").trim(),
-    username: source.username || body.username || query.username || "",
-    globalName: source.global_name || source.globalName || body.globalName || "",
-    avatar: source.avatar || body.avatar || ""
+    exists,
+    active,
+    subscriber: exists ? sub : null,
+    message: active
+      ? `حساب Discord مسجل ومفعل في ${BRAND_NAME}.`
+      : exists
+        ? `الاشتراك غير فعال أو منتهي في ${BRAND_NAME}.`
+        : `حساب Discord غير مسجل في ${BRAND_NAME}.`
   };
 }
 
-async function getDiscordUserFromToken(token) {
-  if (!token) return null;
-  const res = await fetch("https://discord.com/api/users/@me", {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-function buildAccessResult(user) {
-  const subscribers = loadSubscribers();
-  const discordId = String(user?.id || "").trim();
-  const sub = subscribers.get(discordId);
-  const active = Boolean(sub && sub.status !== "banned" && sub.status !== "disabled" && !isExpired(sub.expiresAt));
-
+function managerPayload(discordId = "") {
+  const check = verifySubscriber(discordId);
   return {
     ok: true,
     brand: BRAND_NAME,
-    registered: active,
-    allowed: active,
-    authenticated: active,
-    message: active
-      ? `Discord account is registered in ${BRAND_NAME}.`
-      : `Discord account is not registered in ${BRAND_NAME}.`,
-    message_ar: active
-      ? `حساب ديسكورد مسجل ومفعّل في ${BRAND_NAME}.`
-      : `حساب ديسكورد غير مسجل في ${BRAND_NAME}.`,
-    user: {
-      id: discordId,
-      username: user?.username || "",
-      globalName: user?.globalName || user?.global_name || "",
-      avatar: user?.avatar || ""
-    },
-    subscription: active
+    registered: check.active,
+    allowed: check.active,
+    active: check.active,
+    message: check.message,
+    user: check.subscriber,
+    subscription: check.subscriber
       ? {
-          status: "active",
-          plan: sub.plan || "basic",
-          role: sub.role || "member",
-          name: sub.name || user?.username || "مشترك",
-          expiresAt: sub.expiresAt || "2099-12-31"
+          plan: check.subscriber.plan,
+          status: check.active ? "active" : check.subscriber.status,
+          expiresAt: check.subscriber.expiresAt
         }
-      : {
-          status: sub?.status || "inactive",
-          plan: sub?.plan || null,
-          role: sub?.role || null,
-          expiresAt: sub?.expiresAt || null
-        },
-    controls: {
-      kickTabs: active,
-      openChannels: active,
-      muteTabs: active,
-      reloadTabs: active,
-      focusLock: active,
-      sessions: active
-    }
+      : null,
+    permissions: check.active
+      ? ["tabs", "kick", "queue", "profiles", "activity", "mute", "reload", "open_all"]
+      : [],
+    config: getConfig()
   };
 }
 
-async function verifyHandler(req, res) {
-  try {
-    let user = extractDiscordUser(req.body, req.query);
-    const token = req.body.accessToken || req.body.access_token || req.query.accessToken || req.query.access_token;
-    if (!user.id && token) {
-      const discordUser = await getDiscordUserFromToken(token);
-      if (discordUser) user = extractDiscordUser({ user: discordUser }, {});
+function getConfig() {
+  const defaultStreamers = listFromEnv("DEFAULT_STREAMERS");
+  return {
+    brandName: BRAND_NAME,
+    clientId: DISCORD_CLIENT_ID,
+    extensionId: EXTENSION_ID,
+    supportUrl: SUPPORT_URL,
+    font: "Cairo",
+    locale: "ar",
+    direction: "rtl",
+    theme: {
+      primary: "#8b5cf6",
+      secondary: "#06b6d4",
+      background: "#070816"
+    },
+    defaultStreamers,
+    features: {
+      discordLogin: true,
+      subscribers: true,
+      liveQueue: true,
+      profiles: true,
+      activity: true,
+      kickTabs: true
     }
-
-    if (!user.id) {
-      return res.status(400).json({
-        ok: false,
-        registered: false,
-        allowed: false,
-        message: "Discord user id is required.",
-        message_ar: "معرّف حساب Discord مطلوب."
-      });
-    }
-
-    return res.json(buildAccessResult(user));
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ ok: false, error: "server_error", message_ar: "حدث خطأ داخل السيرفر." });
-  }
+  };
 }
 
 app.get("/", (req, res) => {
@@ -188,92 +151,108 @@ app.get("/", (req, res) => {
     ok: true,
     name: `${BRAND_NAME} Manager API`,
     brand: BRAND_NAME,
+    version: "4.0.0",
     status: "running",
-    language: "ar",
-    font: "Cairo",
     extensionId: EXTENSION_ID,
-    clientId: DISCORD_CLIENT_ID
+    clientId: DISCORD_CLIENT_ID,
+    message: "السيرفر يعمل بنجاح"
   });
 });
 
 app.get("/health", (req, res) => res.json({ ok: true, status: "healthy" }));
+app.get("/api/manager/health", (req, res) => res.json({ ok: true, status: "healthy", brand: BRAND_NAME }));
+app.get("/api/manager/config", (req, res) => res.json({ ok: true, config: getConfig() }));
+app.get("/api/manager/settings", (req, res) => res.json({ ok: true, settings: getConfig() }));
 
-app.get("/api/manager/config", (req, res) => {
+app.post("/api/manager/auth/verify", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.get("/api/manager/auth/verify", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.post("/api/manager/login", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.get("/api/manager/me", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.post("/api/manager/me", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.get("/api/manager/subscription", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json(managerPayload(discordId));
+});
+
+app.get("/api/manager/streamers", (req, res) => {
   res.json({
     ok: true,
-    brand: BRAND_NAME,
-    language: "ar",
-    direction: "rtl",
-    font: "Cairo",
-    supportUrl: SUPPORT_URL,
-    discordClientId: DISCORD_CLIENT_ID,
-    extensionId: EXTENSION_ID,
-    redirectUri: `https://${EXTENSION_ID}.chromiumapp.org/discord`,
-    labels: {
-      title: "نظام تحكم PUREX STORE",
-      login: "تسجيل الدخول عبر Discord",
-      registered: "الحساب مسجل ومفعل",
-      notRegistered: "الحساب غير مسجل"
-    }
+    streamers: getConfig().defaultStreamers.map((name) => ({ name, url: `https://kick.com/${name}` }))
   });
 });
 
-app.post("/api/manager/auth/verify", verifyHandler);
-app.post("/api/manager/auth/discord", verifyHandler);
-app.post("/api/manager/discord/verify", verifyHandler);
-app.post("/api/manager/verify", verifyHandler);
-app.get("/api/manager/auth/verify", verifyHandler);
-
-app.all("/api/manager/me", verifyHandler);
-app.all("/api/manager/session", (req, res) => {
-  res.json({ ok: true, brand: BRAND_NAME, session: { active: true }, message_ar: "الجلسة جاهزة." });
-});
-app.all("/api/manager/subscription", verifyHandler);
-app.all("/api/manager/controls", (req, res) => {
+app.get("/api/manager/profiles", (req, res) => {
   res.json({
     ok: true,
-    brand: BRAND_NAME,
-    controls: {
-      kickTabs: true,
-      openChannels: true,
-      muteTabs: true,
-      reloadTabs: true,
-      focusLock: true,
-      sessions: true
-    },
-    message_ar: "تم تحميل أدوات التحكم."
+    profiles: [
+      { id: "default", name: "الملف الافتراضي", description: "إعدادات PUREX STORE الافتراضية", active: true }
+    ]
   });
 });
 
-app.get("/api/manager/subscribers/count", (req, res) => {
-  res.json({ ok: true, count: loadSubscribers().size });
+app.get("/api/manager/queue", (req, res) => {
+  res.json({ ok: true, queue: [], message: "قائمة الانتظار جاهزة." });
+});
+
+app.post("/api/manager/queue", (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  res.json({ ok: true, accepted: items.length, queue: items, message: "تم استلام قائمة الانتظار." });
+});
+
+app.get("/api/manager/activity", (req, res) => {
+  res.json({
+    ok: true,
+    activity: [
+      { time: new Date().toISOString(), type: "system", message: "PUREX STORE API يعمل بنجاح." }
+    ]
+  });
+});
+
+app.get("/api/manager/dashboard", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
+  res.json({ ...managerPayload(discordId), dashboard: { queueCount: 0, activeProfiles: 1, activeTabs: 0 } });
 });
 
 app.get("/api/manager/extension/updates.xml", (req, res) => {
   res.type("application/xml");
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>
-<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
-  <app appid="${EXTENSION_ID}">
-    <updatecheck status="noupdate"/>
-  </app>
-</gupdate>`);
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">\n  <app appid="${EXTENSION_ID}">\n    <updatecheck status="noupdate"/>\n  </app>\n</gupdate>`);
 });
 
+// Safe fallback for any manager route requested by older/custom extension builds.
 app.all("/api/manager/*", (req, res) => {
+  const discordId = getDiscordId(req.body, req.query);
   res.json({
-    ok: true,
-    brand: BRAND_NAME,
+    ...managerPayload(discordId),
     route: req.path,
-    implemented: true,
-    message: "Manager route handled by PUREX STORE API.",
-    message_ar: "تمت معالجة مسار المدير بواسطة PUREX STORE API."
+    method: req.method,
+    note: "تمت معالجة هذا المسار بواسطة PUREX STORE Manager API v4."
   });
 });
 
 app.use((req, res) => {
-  res.status(404).json({ ok: false, error: "not_found", path: req.path, message_ar: "المسار غير موجود." });
+  res.status(404).json({ ok: false, error: "المسار غير موجود", path: req.path });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`${BRAND_NAME} Manager API v3 running on port ${PORT}`);
+  console.log(`${BRAND_NAME} Manager API v4 running on port ${PORT}`);
 });
