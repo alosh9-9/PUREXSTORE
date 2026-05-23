@@ -1,18 +1,17 @@
 {
-  "name": "purex-store-manager-api",
-  "version": "1.0.0",
-  "description": "PUREX STORE Manager API for Discord authorization",
+  "name": "purex-store-manager-api-v3-arabic",
+  "version": "3.0.0",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.3"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }

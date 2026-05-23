@@ -1,0 +1,9 @@
+{
+  "PUT_YOUR_DISCORD_USER_ID_HERE": {
+    "name": "مالك النظام",
+    "plan": "owner",
+    "expiresAt": "2099-12-31",
+    "status": "active",
+    "role": "owner"
+  }
+}

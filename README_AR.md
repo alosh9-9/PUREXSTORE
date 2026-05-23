@@ -1,65 +1,29 @@
-# PUREX STORE Manager API
+# PUREX STORE Manager API v3
 
-هذا سيرفر API خاص لإضافة PUREX STORE حتى لا تبقى مربوطة برابط AKS.
+نسخة عربية خاصة لإدارة دخول Discord والمشتركين لإضافة PUREX STORE.
 
-## القيم الجاهزة
+## على Render
 
-- Discord OAuth Client ID: `1507511509339607060`
-- Extension ID: `bicngpoijkcigllgeeocfoifegobhkfj`
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Root Directory: اتركه فارغ إذا رفعت الملفات مباشرة في GitHub.
 
-## متغيرات Render المطلوبة
+## Environment Variables
 
-ضع هذه القيم في Environment Variables داخل Render:
+ضع هذه القيم في Render:
 
 ```text
 BRAND_NAME=PUREX STORE
 DISCORD_CLIENT_ID=1507511509339607060
 EXTENSION_ID=bicngpoijkcigllgeeocfoifegobhkfj
 SUPPORT_URL=https://discord.gg/a99
-ALLOWED_DISCORD_IDS=ضع Discord User ID الخاص بحسابك هنا
+ALLOWED_DISCORD_IDS=Discord User ID مالك
 ```
 
-مهم: `ALLOWED_DISCORD_IDS` يحتاج Discord User ID الخاص بحسابك، وليس Client ID.
-
-## أوامر Render
-
-Build Command:
+لإضافة أكثر من مشترك:
 
 ```text
-npm install
+ALLOWED_DISCORD_IDS=111111111111111111,222222222222222222
 ```
 
-Start Command:
-
-```text
-npm start
-```
-
-## اختبار السيرفر
-
-بعد النشر افتح رابط Render. إذا ظهر JSON فيه `ok: true` فالسيرفر يعمل.
-
-بعدها ضع رابط Render داخل الإضافة في خانة:
-
-```text
-MANAGER API URL
-```
-
-مثال:
-
-```text
-https://purex-store-manager.onrender.com
-```
-
-بدون `/` في النهاية.
-
-
-## تحديث v2
-
-تمت إضافة معالج مرن لأي مسار يبدأ بـ `/api/manager/` حتى لا تظهر رسالة:
-
-```text
-Manager route not implemented yet
-```
-
-بعد رفع هذه النسخة إلى GitHub، افتح Render واضغط Manual Deploy > Deploy latest commit.
+أو استخدم `SUBSCRIBERS_JSON` لإضافة خطط وانتهاء اشتراك.
